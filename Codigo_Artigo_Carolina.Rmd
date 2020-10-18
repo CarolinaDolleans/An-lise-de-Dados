@@ -1,0 +1,1854 @@
+---
+title: "Codigo_Artigo_Carolina"
+author: "Carolina Gabriela Dolléans"
+date: "17/10/2020"
+output: github_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+```{r}
+setwd("C:\\Users\\Caro\\Desktop\\Mestrado CP\\Analise de Dados\\Artigo\\Dados Artigo")
+
+library(tidyverse)
+library(readxl)
+library(writexl)
+library(dplyr)
+library(forcats)
+library(ggthemes)
+library(scales)
+library(grid)
+library(vcd)
+library(graphics)
+library(car)
+library(MASS)
+```
+
+Primeiro, vamos criar o banco correspondendo às características dos candidatos. Será útil para nossas variáveis de controle e para as interações. Visto que vamos trabalhar apenas com as regiões do Sul e do Sudeste, vamos filtrar esse banco.
+
+```{r}
+cons_cand <- read.csv2("consulta_cand_2018_BRASIL.csv")
+
+cand_cont <- cons_cand %>%
+  filter(NR_TURNO == 1, CD_CARGO %in% c('6', '7'), 
+         CD_DETALHE_SITUACAO_CAND %in% c('2', '16'),
+         SG_UF %in% c("ES","MG", "RJ", "SP", "PR", "SC", "RS")) %>%
+  dplyr::select(SG_UF, SQ_CANDIDATO, SG_PARTIDO, NM_PARTIDO, 
+         CD_CARGO, DS_CARGO, NR_IDADE_DATA_POSSE, DS_GENERO,
+         CD_GRAU_INSTRUCAO, DS_COR_RACA)
+```
+
+Nesse banco filtrado, fizemos várias operações: guardamos todos os candidatos com o NR_TURNO == 1; filtramos os candidatos a deputado federal e a deputado estadual com o CD_CARGO %in% c('6', '7'); filtramos também apenas os candidatos que de fato chegaram às urnas com CD_DETALHE_SITUACAO_CAND %in% c('2', '16'); e filtramos os estados que queríamos. 
+
+Nesse banco, selecionei: a sigla dos estados (SG_UF); o número sequencial dos candidatos (SQ_CANDIDATO); a sigla (SG_PARTIDO) e o nome (NM_PARTIDO) dos partidos ; o cargo (CD_CARGO e DS_CARGO) ao qual os candidatos se candidataram; a idade (NR_IDADE_DATA_POSSE) dos candidatos; o gênero (CD_GENERO) dos candidatos; o grau de instrução (CD_GRAU_INSTRUCAO) dos candidatos; e a raça (CD_COR_RACA) dos candidatos.
+
+
+
+A seguir, vamos criar e filtrar o banco de votos por município:
+
+
+```{r}
+votos_mun <- read.csv2("votacao_candidato_munzona_2018_BRASIL.csv")
+
+votos_mun_fil <- votos_mun %>%
+  filter(NR_TURNO == 1, CD_CARGO %in% c('6', '7'), 
+         CD_DETALHE_SITUACAO_CAND %in% c('2', '16'),
+         SG_UF %in% c("ES","MG", "RJ", "SP", "PR", "SC", "RS")) %>%
+  dplyr::select(SG_UF, NM_MUNICIPIO, 
+         CD_CARGO, DS_CARGO, SQ_CANDIDATO,
+         SG_PARTIDO, NM_PARTIDO,
+         QT_VOTOS_NOMINAIS, CD_SIT_TOT_TURNO)
+```
+
+Nesse banco filtrado, fizemos as mesmas operações que no banco precedente: guardamos todos os candidatos com o NR_TURNO == 1; filtramos os candidatos a deputado federal e a deputado estadual com o CD_CARGO %in% c('6', '7'); filtramos também apenas os candidatos que de fato chegaram às urnas com CD_DETALHE_SITUACAO_CAND %in% c('2', '16'); e filtramos os estados que queríamos. 
+
+Nesse banco, selecionei: a sigla dos estados (SG_UF); o nome dos municípios (NM_MUNICIPIO);  o número sequencial dos candidatos (SQ_CANDIDATO); a sigla (SG_PARTIDO) e o nome (NM_PARTIDO) dos partidos ; o cargo (CD_CARGO e DS_CARGO) ao qual os candidatos se candidataram; a quantidade de votos (QT_VOTOS_NOMINAIS) dos candidatos por município; e a situação (CD_SIT_TOT_TURNO) do candidato, se foi eleito o não.
+
+Agora, vamos criar um banco totalizando os votos para cada candidatos. Adicionamos média, mediana, mínimo e máximo.
+
+```{r}
+votos_cand_totais <- votos_mun_fil %>%
+  group_by(SQ_CANDIDATO) %>%
+  summarise(media = mean(QT_VOTOS_NOMINAIS, na.rm = TRUE), 
+            mediana = median(QT_VOTOS_NOMINAIS, na.rm = TRUE), 
+            minimo = min(QT_VOTOS_NOMINAIS, na.rm = TRUE),
+            maximo = max(QT_VOTOS_NOMINAIS, na.rm = TRUE),
+            soma = sum(QT_VOTOS_NOMINAIS, na.rm = TRUE))
+
+```
+
+#########################################################################
+
+A seguir, vamos separar os votos por estado.
+
+Espírito Santo
+
+```{r}
+votos_ES <- votos_mun_fil %>%
+  filter(SG_UF %in% c("ES"))
+```
+
+
+# DOMINACAO 
+
+Primeiramente, vamos criar um banco que totaliza a quantidade de votos por município e por candidato. Essa etapa é fundamental porque algumas cidades maiores aparecem várias vezes, por isso, é necessário totalizar os votos por cidade em função de cada candidato.
+
+```{r}
+votos_cand_mun_ES <- aggregate(votos_ES$QT_VOTOS_NOMINAIS ~ votos_ES$NM_MUNICIPIO + votos_ES$SQ_CANDIDATO, data = votos_ES, FUN = sum)
+```
+
+
+A seguir, vamos criar um banco com a quantidade total de votos que cada candidato recebeu.
+
+```{r}
+votos_totais_cand_ES <- aggregate(votos_ES$QT_VOTOS_NOMINAIS ~ votos_ES$SQ_CANDIDATO, data = votos_ES, FUN = sum)
+```
+
+## PESO POR MUNICÍPIO PARA CADA CANDIDATO 
+
+A seguir, vamos mesclar os dois bancos em função do SQ_CANDIDATO. Assim, teremos a quantidade total que cada candidato recebeu em uma coluna, e, na outra, a quantidade de votos que recebeu em cada município.
+
+```{r}
+votos_PESO_ES <- merge(votos_cand_mun_ES, votos_totais_cand_ES, by = "votos_ES$SQ_CANDIDATO")
+```
+
+Com isso, vamos calcular o peso relativo que cada município tem na quantidade total dos votos de cada candidato. 
+
+```{r}
+PESO_MUN_ES <- (as.numeric(votos_PESO_ES$"votos_ES$QT_VOTOS_NOMINAIS.x") / as.numeric(votos_PESO_ES$"votos_ES$QT_VOTOS_NOMINAIS.y")) * 100
+```
+
+Agora, vamos adicionar essas porcentagens ao banco votos_PESO_ES e modificar os nomes da colunas para ter algo mais compreensível. 
+
+```{r}
+colnames(votos_PESO_ES) <- c("SQ_CANDIDATO", "NM_MUNICIPIO",
+                              "VOTOS_MUN_CAND", "VOTOS_TOTAIS_CAND")
+
+votos_PESO_ES <- votos_PESO_ES %>%
+dplyr::mutate(PESO_MUN_ES = PESO_MUN_ES)
+```
+
+
+write_xlsx(votos_totais_mun_ES, "votos_totais_mun_ES.xlsx")
+
+
+
+## PORCENTAGEM DE VOTOS DE CADA CANDIDATO EM CADA MUNICÍPIO
+
+A seguir, criamos um banco com a quantidade total de votos que cada município recebeu, independentemente dos candidatos.
+Obs: existem 78 municipalidades no Espírito Santo.
+
+```{r}
+votos_totais_mun_ES <- aggregate(votos_ES$QT_VOTOS_NOMINAIS ~ votos_ES$NM_MUNICIPIO, data = votos_ES, FUN=sum)
+```
+
+A seguir, vamos mesclar o banco votos_cand_mun_ES e o banco votos_totais_mun_ES que acabamos de criar em função de NM_MUNICIPIO, os nomes dos municípios, para ter a quantidade de votos que cada candidato obteve em cada município. 
+
+```{r}
+votos_PORCENTAGEM_ES <- merge(votos_cand_mun_ES, votos_totais_mun_ES, by ="votos_ES$NM_MUNICIPIO")
+```
+
+A seguir, vamos criar a porcentagem de cada candidato em cada município:
+
+```{r}
+PORCENTAGEM_CAND_ES <- (as.numeric(votos_PORCENTAGEM_ES$"votos_ES$QT_VOTOS_NOMINAIS.x") / as.numeric(votos_PORCENTAGEM_ES$"votos_ES$QT_VOTOS_NOMINAIS.y")) * 100
+```
+
+
+Agora, vamos adicionar essas porcentagens ao banco votos_PORCENTAGEM_ES e modificar os nomes da colunas para ter algo mais compreensível. 
+
+```{r}
+votos_PORCENTAGEM_ES <- votos_PORCENTAGEM_ES %>%
+  dplyr::mutate(PORCENTAGEM_CAND_ES = PORCENTAGEM_CAND_ES)
+
+colnames(votos_PORCENTAGEM_ES) <- c("NM_MUNICIPIO", "SQ_CANDIDATO",
+                              "VOTOS_MUN_CAND", "VOTOS_TOTAIS_MUN", 
+                              "PORCENTAGEM_CAND_ES")
+```
+
+# CÁLCULO DA VARIÁVEL DOMINAÇÃO
+
+A seguir, vamos multiplicar os vetores PESO_MUN e PORCENTAGEM_CAND e vou adicionar esse vetor ao último banco criado. 
+Para fazer isso, eu preciso primeiro de reordenar meus dois bancos da mesma forma, votos_mun_cand_ES e votos_cand_ES, pois, eles foram criados de forma diferente: 
+
+```{r}
+votos_PESO_ES <- votos_PESO_ES %>%
+  arrange(votos_PESO_ES$SQ_CANDIDATO, votos_PESO_ES$NM_MUNICIPIO)
+
+votos_PORCENTAGEM_ES <- votos_PORCENTAGEM_ES %>%
+  arrange(votos_PORCENTAGEM_ES$SQ_CANDIDATO, votos_PORCENTAGEM_ES$NM_MUNICIPIO)
+
+MULTIP_ES <- votos_PESO_ES$PESO_MUN_ES * votos_PORCENTAGEM_ES$PORCENTAGEM_CAND_ES
+
+dominacao_ES <- votos_PESO_ES %>%
+  dplyr::mutate(MULTIP_ES = MULTIP_ES)
+```
+
+
+Enfim, vou fazer a média por candidato. Para isso, preciso primeiro somar essas porcentagens para cada candidato:
+
+
+```{r}
+dominacao_cand_ES <- aggregate(MULTIP_ES ~ SQ_CANDIDATO, data = votos_PORCENTAGEM_ES, FUN = sum)
+
+dominacao_cand_ES <- dominacao_cand_ES %>%
+  dplyr::mutate(MULTIP_ES = MULTIP_ES/78)
+```
+
+
+Primeiro, eu vou mesclar esse banco dominacao_cand com o banco cand_cont em função do SQ_CANDIDATO e renomear a coluna chamada MULTIP_ES. E vou também criar um banco com apenas os candidatos que foram eleitos. 
+
+```{r}
+cand_cont_ES <- merge(dominacao_cand_ES, cand_cont, by = "SQ_CANDIDATO")
+
+colnames(cand_cont_ES)[2] <- "DOMINACAO"
+
+dep_cont_ES <- merge(cand_cont_ES, votos_ES, by = "SQ_CANDIDATO") %>%
+  filter(CD_SIT_TOT_TURNO %in% c(1, 2, 3),
+         NM_MUNICIPIO %in% "AFONSO CLÁUDIO") %>%
+  dplyr::select(SQ_CANDIDATO, DOMINACAO, SG_UF.x, SG_PARTIDO.x, NM_PARTIDO.x, 
+         NR_IDADE_DATA_POSSE, DS_GENERO, CD_GRAU_INSTRUCAO,
+         DS_COR_RACA)
+```
+
+
+################################################################################
+
+Minas Gerais:
+
+```{r}
+votos_MG <- votos_mun_fil %>%
+  filter(SG_UF %in% c("MG"))
+```
+
+
+# DOMINACAO 
+
+Primeiramente, vamos criar um banco que totaliza a quantidade de votos por município e por candidato. Essa etapa é fundamental porque algumas cidades maiores aparecem várias vezes, por isso, é necessário totalizar os votos por cidade em função de cada candidato.
+
+```{r}
+votos_cand_mun_MG <- aggregate(votos_MG$QT_VOTOS_NOMINAIS ~ votos_MG$NM_MUNICIPIO + votos_MG$SQ_CANDIDATO, data = votos_MG, FUN = sum)
+```
+
+
+A seguir, vamos criar um banco com a quantidade total de votos que cada candidato recebeu.
+
+```{r}
+votos_totais_cand_MG <- aggregate(votos_MG$QT_VOTOS_NOMINAIS ~ votos_MG$SQ_CANDIDATO, data = votos_MG, FUN = sum)
+```
+
+## PESO POR MUNICÍPIO PARA CADA CANDIDATO 
+
+A seguir, vamos mesclar os dois bancos em função do SQ_CANDIDATO. Assim, teremos a quantidade total que cada candidato recebeu em uma coluna, e, na outra, a quantidade de votos que recebeu em cada município.
+
+```{r}
+votos_PESO_MG <- merge(votos_cand_mun_MG, votos_totais_cand_MG, by = "votos_MG$SQ_CANDIDATO")
+```
+
+Com isso, vamos calcular o peso relativo que cada município tem na quantidade total dos votos de cada candidato. 
+
+```{r}
+PESO_MUN_MG <- (as.numeric(votos_PESO_MG$"votos_MG$QT_VOTOS_NOMINAIS.x") / as.numeric(votos_PESO_MG$"votos_MG$QT_VOTOS_NOMINAIS.y")) * 100
+```
+
+Agora, vamos adicionar essas porcentagens ao banco votos_PESO_ES e modificar os nomes da colunas para ter algo mais compreensível. 
+
+```{r}
+colnames(votos_PESO_MG) <- c("SQ_CANDIDATO", "NM_MUNICIPIO",
+                              "VOTOS_MUN_CAND", "VOTOS_TOTAIS_CAND")
+
+votos_PESO_MG <- votos_PESO_MG %>%
+dplyr::mutate(PESO_MUN_MG = PESO_MUN_MG)
+```
+
+
+write_xlsx(votos_totais_mun_MG, "votos_totais_mun_MG.xlsx")
+
+
+
+## PORCENTAGEM DE VOTOS DE CADA CANDIDATO EM CADA MUNICÍPIO
+
+A seguir, criamos um banco com a quantidade total de votos que cada município recebeu, independentemente dos candidatos. 
+Obs: existem 853 municipios em Minas Gerais.
+
+```{r}
+votos_totais_mun_MG <- aggregate(votos_MG$QT_VOTOS_NOMINAIS ~ votos_MG$NM_MUNICIPIO, data = votos_MG, FUN = sum)
+```
+
+A seguir, vamos mesclar o banco votos_cand_mun_ES e o banco votos_totais_mun_ES que acabamos de criar em função de NM_MUNICIPIO, os nomes dos municípios, para ter a quantidade de votos que cada candidato obteve em cada município. 
+
+```{r}
+votos_PORCENTAGEM_MG <- merge(votos_cand_mun_MG, votos_totais_mun_MG, by ="votos_MG$NM_MUNICIPIO")
+```
+
+A seguir, vamos criar a porcentagem de cada candidato em cada município:
+
+```{r}
+PORCENTAGEM_CAND_MG <- (as.numeric(votos_PORCENTAGEM_MG$"votos_MG$QT_VOTOS_NOMINAIS.x") / as.numeric(votos_PORCENTAGEM_MG$"votos_MG$QT_VOTOS_NOMINAIS.y")) * 100
+```
+
+
+Agora, vamos adicionar essas porcentagens ao banco votos_PORCENTAGEM_ES e modificar os nomes da colunas para ter algo mais compreensível. 
+
+```{r}
+votos_PORCENTAGEM_MG <- votos_PORCENTAGEM_MG %>%
+  dplyr::mutate(PORCENTAGEM_CAND_MG = PORCENTAGEM_CAND_MG)
+
+colnames(votos_PORCENTAGEM_MG) <- c("NM_MUNICIPIO", "SQ_CANDIDATO",
+                              "VOTOS_MUN_CAND", "VOTOS_TOTAIS_MUN", 
+                              "PORCENTAGEM_CAND_MG")
+```
+
+# CÁLCULO DA VARIÁVEL DOMINAÇÃO
+
+A seguir, vamos multiplicar os vetores PESO_MUN e PORCENTAGEM_CAND e vou adicionar esse vetor ao último banco criado. 
+Para fazer isso, eu preciso primeiro de reordenar meus dois bancos da mesma forma, votos_mun_cand_ES e votos_cand_ES, pois, eles foram criados de forma diferente: 
+
+```{r}
+votos_PESO_MG <- votos_PESO_MG %>%
+  arrange(votos_PESO_MG$SQ_CANDIDATO, votos_PESO_MG$NM_MUNICIPIO)
+
+votos_PORCENTAGEM_MG <- votos_PORCENTAGEM_MG %>%
+  arrange(votos_PORCENTAGEM_MG$SQ_CANDIDATO, votos_PORCENTAGEM_MG$NM_MUNICIPIO)
+
+MULTIP_MG <- votos_PESO_MG$PESO_MUN_MG * votos_PORCENTAGEM_MG$PORCENTAGEM_CAND_MG
+
+dominacao_MG <- votos_PESO_MG %>%
+  dplyr::mutate(MULTIP_MG = MULTIP_MG)
+```
+
+
+Enfim, vou fazer a média por candidato. Para isso, preciso primeiro somar essas porcentagens para cada candidato:
+
+
+```{r}
+dominacao_cand_MG <- aggregate(MULTIP_MG ~ SQ_CANDIDATO, data = votos_PORCENTAGEM_MG, FUN = sum)
+
+dominacao_cand_MG <- dominacao_cand_MG %>%
+  dplyr::mutate(MULTIP_MG = MULTIP_MG/853)
+```
+
+
+Primeiro, eu vou mesclar esse banco dominacao_cand com o banco cand_cont em função do SQ_CANDIDATO e renomear a coluna chamada MULTIP_ES. E vou também criar um banco com apenas os candidatos que foram eleitos.
+
+```{r}
+cand_cont_MG <- merge(dominacao_cand_MG, cand_cont, by = "SQ_CANDIDATO")
+
+colnames(cand_cont_MG)[2] <- "DOMINACAO"
+
+dep_cont_MG <- merge(cand_cont_MG, votos_MG, by = "SQ_CANDIDATO") %>%
+  filter(CD_SIT_TOT_TURNO %in% c(1, 2, 3),
+         NM_MUNICIPIO %in% "MANGA") %>%
+  dplyr::select(SQ_CANDIDATO, DOMINACAO, SG_UF.x, SG_PARTIDO.x, NM_PARTIDO.x, 
+         NR_IDADE_DATA_POSSE, DS_GENERO, CD_GRAU_INSTRUCAO,
+         DS_COR_RACA)
+```
+
+
+################################################################################
+
+Rio de Janeiro:
+
+```{r}
+votos_RJ <- votos_mun_fil %>%
+  filter(SG_UF %in% c("RJ"))
+```
+
+
+# DOMINACAO 
+
+Primeiramente, vamos criar um banco que totaliza a quantidade de votos por município e por candidato. Essa etapa é fundamental porque algumas cidades maiores aparecem várias vezes, por isso, é necessário totalizar os votos por cidade em função de cada candidato.
+
+```{r}
+votos_cand_mun_RJ <- aggregate(votos_RJ$QT_VOTOS_NOMINAIS ~ votos_RJ$NM_MUNICIPIO + votos_RJ$SQ_CANDIDATO, data = votos_RJ, FUN = sum)
+```
+
+
+A seguir, vamos criar um banco com a quantidade total de votos que cada candidato recebeu.
+
+```{r}
+votos_totais_cand_RJ <- aggregate(votos_RJ$QT_VOTOS_NOMINAIS ~ votos_RJ$SQ_CANDIDATO, data = votos_RJ, FUN = sum)
+```
+
+## PESO POR MUNICÍPIO PARA CADA CANDIDATO 
+
+A seguir, vamos mesclar os dois bancos em função do SQ_CANDIDATO. Assim, teremos a quantidade total que cada candidato recebeu em uma coluna, e, na outra, a quantidade de votos que recebeu em cada município.
+
+```{r}
+votos_PESO_RJ <- merge(votos_cand_mun_RJ, votos_totais_cand_RJ, by = "votos_RJ$SQ_CANDIDATO")
+```
+
+Com isso, vamos calcular o peso relativo que cada município tem na quantidade total dos votos de cada candidato. 
+
+```{r}
+PESO_MUN_RJ <- (as.numeric(votos_PESO_RJ$"votos_RJ$QT_VOTOS_NOMINAIS.x") / as.numeric(votos_PESO_RJ$"votos_RJ$QT_VOTOS_NOMINAIS.y")) * 100
+```
+
+Agora, vamos adicionar essas porcentagens ao banco votos_PESO_ES e modificar os nomes da colunas para ter algo mais compreensível. 
+
+```{r}
+colnames(votos_PESO_RJ) <- c("SQ_CANDIDATO", "NM_MUNICIPIO",
+                              "VOTOS_MUN_CAND", "VOTOS_TOTAIS_CAND")
+
+votos_PESO_RJ <- votos_PESO_RJ %>%
+dplyr::mutate(PESO_MUN_RJ = PESO_MUN_RJ)
+```
+
+
+## PORCENTAGEM DE VOTOS DE CADA CANDIDATO EM CADA MUNICÍPIO
+
+A seguir, criamos um banco com a quantidade total de votos que cada município recebeu, independentemente dos candidatos.
+Obs: Existem 92 cidades no estado do Rio de Janeiro
+
+```{r}
+votos_totais_mun_RJ <- aggregate(votos_RJ$QT_VOTOS_NOMINAIS ~ votos_RJ$NM_MUNICIPIO, data = votos_RJ, FUN = sum)
+```
+
+A seguir, vamos mesclar o banco votos_cand_mun_RJ e o banco votos_totais_mun_RJ que acabamos de criar em função de NM_MUNICIPIO, os nomes dos municípios, para ter a quantidade de votos que cada candidato obteve em cada município. 
+
+```{r}
+votos_PORCENTAGEM_RJ <- merge(votos_cand_mun_RJ, votos_totais_mun_RJ, by ="votos_RJ$NM_MUNICIPIO")
+```
+
+A seguir, vamos criar a porcentagem de cada candidato em cada município:
+
+```{r}
+PORCENTAGEM_CAND_RJ <- (as.numeric(votos_PORCENTAGEM_RJ$"votos_RJ$QT_VOTOS_NOMINAIS.x") / as.numeric(votos_PORCENTAGEM_RJ$"votos_RJ$QT_VOTOS_NOMINAIS.y")) * 100
+```
+
+
+Agora, vamos adicionar essas porcentagens ao banco votos_PORCENTAGEM_ES e modificar os nomes da colunas para ter algo mais compreensível. 
+
+```{r}
+votos_PORCENTAGEM_RJ <- votos_PORCENTAGEM_RJ %>%
+  dplyr::mutate(PORCENTAGEM_CAND_RJ = PORCENTAGEM_CAND_RJ)
+
+colnames(votos_PORCENTAGEM_RJ) <- c("NM_MUNICIPIO", "SQ_CANDIDATO",
+                              "VOTOS_MUN_CAND", "VOTOS_TOTAIS_MUN", 
+                              "PORCENTAGEM_CAND_RJ")
+```
+
+# CÁLCULO DA VARIÁVEL DOMINAÇÃO
+
+A seguir, vamos multiplicar os vetores PESO_MUN e PORCENTAGEM_CAND e vou adicionar esse vetor ao último banco criado. 
+Para fazer isso, eu preciso primeiro de reordenar meus dois bancos da mesma forma, votos_mun_cand_ES e votos_cand_ES, pois, eles foram criados de forma diferente: 
+
+```{r}
+votos_PESO_RJ <- votos_PESO_RJ %>%
+  arrange(votos_PESO_RJ$SQ_CANDIDATO, votos_PESO_RJ$NM_MUNICIPIO)
+
+votos_PORCENTAGEM_RJ <- votos_PORCENTAGEM_RJ %>%
+  arrange(votos_PORCENTAGEM_RJ$SQ_CANDIDATO, votos_PORCENTAGEM_RJ$NM_MUNICIPIO)
+
+MULTIP_RJ <- votos_PESO_RJ$PESO_MUN_RJ * votos_PORCENTAGEM_RJ$PORCENTAGEM_CAND_RJ
+
+dominacao_RJ <- votos_PESO_RJ %>%
+  dplyr::mutate(MULTIP_RJ = MULTIP_RJ)
+```
+
+
+Enfim, vou fazer a média por candidato. Para isso, preciso primeiro somar essas porcentagens para cada candidato:
+
+
+```{r}
+dominacao_cand_RJ <- aggregate(MULTIP_RJ ~ SQ_CANDIDATO, data = votos_PORCENTAGEM_RJ, FUN = sum)
+
+dominacao_cand_RJ <- dominacao_cand_RJ %>%
+  dplyr::mutate(MULTIP_RJ = MULTIP_RJ/92)
+```
+
+
+Primeiro, eu vou mesclar esse banco dominacao_cand com o banco cand_cont em função do SQ_CANDIDATO e renomear a coluna chamada MULTIP_ES. E vou também criar um banco com apenas os candidatos que foram eleitos.
+
+```{r}
+cand_cont_RJ <- merge(dominacao_cand_RJ, cand_cont, by = "SQ_CANDIDATO")
+
+colnames(cand_cont_RJ)[2] <- "DOMINACAO"
+
+dep_cont_RJ <- merge(cand_cont_RJ, votos_RJ, by = "SQ_CANDIDATO") %>%
+  filter(CD_SIT_TOT_TURNO %in% c(1, 2, 3),
+         NM_MUNICIPIO %in% "CORDEIRO") %>%
+  dplyr::select(SQ_CANDIDATO, DOMINACAO, SG_UF.x, SG_PARTIDO.x, NM_PARTIDO.x, 
+         NR_IDADE_DATA_POSSE, DS_GENERO, CD_GRAU_INSTRUCAO,
+         DS_COR_RACA)
+```
+
+
+################################################################################
+
+Sao Paulo
+
+```{r}
+votos_SP <- votos_mun_fil %>%
+  filter(SG_UF %in% c("SP"))
+```
+
+
+# DOMINACAO 
+
+Primeiramente, vamos criar um banco que totaliza a quantidade de votos por município e por candidato. Essa etapa é fundamental porque algumas cidades maiores aparecem várias vezes, por isso, é necessário totalizar os votos por cidade em função de cada candidato.
+
+```{r}
+votos_cand_mun_SP <- aggregate(votos_SP$QT_VOTOS_NOMINAIS ~ votos_SP$NM_MUNICIPIO + votos_SP$SQ_CANDIDATO, data = votos_SP, FUN = sum)
+```
+
+
+A seguir, vamos criar um banco com a quantidade total de votos que cada candidato recebeu.
+
+```{r}
+votos_totais_cand_SP <- aggregate(votos_SP$QT_VOTOS_NOMINAIS ~ votos_SP$SQ_CANDIDATO, data = votos_SP, FUN = sum)
+```
+
+## PESO POR MUNICÍPIO PARA CADA CANDIDATO 
+
+A seguir, vamos mesclar os dois bancos em função do SQ_CANDIDATO. Assim, teremos a quantidade total que cada candidato recebeu em uma coluna, e, na outra, a quantidade de votos que recebeu em cada município.
+
+```{r}
+votos_PESO_SP <- merge(votos_cand_mun_SP, votos_totais_cand_SP, by = "votos_SP$SQ_CANDIDATO")
+```
+
+Com isso, vamos calcular o peso relativo que cada município tem na quantidade total dos votos de cada candidato. 
+
+```{r}
+PESO_MUN_SP <- (as.numeric(votos_PESO_SP$"votos_SP$QT_VOTOS_NOMINAIS.x") / as.numeric(votos_PESO_SP$"votos_SP$QT_VOTOS_NOMINAIS.y")) * 100
+```
+
+Agora, vamos adicionar essas porcentagens ao banco votos_PESO_ES e modificar os nomes da colunas para ter algo mais compreensível. 
+
+```{r}
+colnames(votos_PESO_SP) <- c("SQ_CANDIDATO", "NM_MUNICIPIO",
+                              "VOTOS_MUN_CAND", "VOTOS_TOTAIS_CAND")
+
+votos_PESO_SP <- votos_PESO_SP %>%
+dplyr::mutate(PESO_MUN_SP = PESO_MUN_SP)
+```
+
+
+## PORCENTAGEM DE VOTOS DE CADA CANDIDATO EM CADA MUNICÍPIO
+
+A seguir, criamos um banco com a quantidade total de votos que cada município recebeu, independentemente dos candidatos.
+Obs: Existem 645 cidades no estado de São Paulo
+
+```{r}
+votos_totais_mun_SP <- aggregate(votos_SP$QT_VOTOS_NOMINAIS ~ votos_SP$NM_MUNICIPIO, data = votos_SP, FUN = sum)
+```
+
+A seguir, vamos mesclar o banco votos_cand_mun_RJ e o banco votos_totais_mun_RJ que acabamos de criar em função de NM_MUNICIPIO, os nomes dos municípios, para ter a quantidade de votos que cada candidato obteve em cada município. 
+
+```{r}
+votos_PORCENTAGEM_SP <- merge(votos_cand_mun_SP, votos_totais_mun_SP, by ="votos_SP$NM_MUNICIPIO")
+```
+
+A seguir, vamos criar a porcentagem de cada candidato em cada município:
+
+```{r}
+PORCENTAGEM_CAND_SP <- (as.numeric(votos_PORCENTAGEM_SP$"votos_SP$QT_VOTOS_NOMINAIS.x") / as.numeric(votos_PORCENTAGEM_SP$"votos_SP$QT_VOTOS_NOMINAIS.y")) * 100
+```
+
+
+Agora, vamos adicionar essas porcentagens ao banco votos_PORCENTAGEM_ES e modificar os nomes da colunas para ter algo mais compreensível. 
+
+```{r}
+votos_PORCENTAGEM_SP <- votos_PORCENTAGEM_SP %>%
+  dplyr::mutate(PORCENTAGEM_CAND_RJ = PORCENTAGEM_CAND_SP)
+
+colnames(votos_PORCENTAGEM_SP) <- c("NM_MUNICIPIO", "SQ_CANDIDATO",
+                              "VOTOS_MUN_CAND", "VOTOS_TOTAIS_MUN", 
+                              "PORCENTAGEM_CAND_SP")
+```
+
+# CÁLCULO DA VARIÁVEL DOMINAÇÃO
+
+A seguir, vamos multiplicar os vetores PESO_MUN e PORCENTAGEM_CAND e vou adicionar esse vetor ao último banco criado. 
+Para fazer isso, eu preciso primeiro de reordenar meus dois bancos da mesma forma, votos_mun_cand_ES e votos_cand_ES, pois, eles foram criados de forma diferente: 
+
+```{r}
+votos_PESO_SP <- votos_PESO_SP %>%
+  arrange(votos_PESO_SP$SQ_CANDIDATO, votos_PESO_SP$NM_MUNICIPIO)
+
+votos_PORCENTAGEM_SP <- votos_PORCENTAGEM_SP %>%
+  arrange(votos_PORCENTAGEM_SP$SQ_CANDIDATO, votos_PORCENTAGEM_SP$NM_MUNICIPIO)
+
+MULTIP_SP <- votos_PESO_SP$PESO_MUN_SP * votos_PORCENTAGEM_SP$PORCENTAGEM_CAND_SP
+
+dominacao_SP <- votos_PESO_SP %>%
+  dplyr::mutate(MULTIP_SP = MULTIP_SP)
+```
+
+
+Enfim, vou fazer a média por candidato. Para isso, preciso primeiro somar essas porcentagens para cada candidato:
+
+
+```{r}
+dominacao_cand_SP <- aggregate(MULTIP_SP ~ SQ_CANDIDATO, data = votos_PORCENTAGEM_SP, FUN = sum)
+
+dominacao_cand_SP <- dominacao_cand_SP %>%
+  dplyr::mutate(MULTIP_SP = MULTIP_SP/645)
+```
+
+Primeiro, eu vou mesclar esse banco dominacao_cand com o banco cand_cont em função do SQ_CANDIDATO e renomear a coluna chamada MULTIP_ES. E vou também criar um banco com apenas os candidatos que foram eleitos.
+
+```{r}
+cand_cont_SP <- merge(dominacao_cand_SP, cand_cont, by = "SQ_CANDIDATO")
+
+colnames(cand_cont_SP)[2] <- "DOMINACAO"
+
+dep_cont_SP <- merge(cand_cont_SP, votos_SP, by = "SQ_CANDIDATO") %>%
+  filter(CD_SIT_TOT_TURNO %in% c(1, 2, 3),
+         NM_MUNICIPIO %in% "FRANCA") %>%
+  dplyr::select(SQ_CANDIDATO, DOMINACAO, SG_UF.x, SG_PARTIDO.x, NM_PARTIDO.x, 
+         NR_IDADE_DATA_POSSE, DS_GENERO, CD_GRAU_INSTRUCAO,
+         DS_COR_RACA)
+```
+
+
+################################################################################
+
+Parana
+
+```{r}
+votos_PR <- votos_mun_fil %>%
+  filter(SG_UF %in% c("PR"))
+```
+
+
+# DOMINACAO 
+
+Primeiramente, vamos criar um banco que totaliza a quantidade de votos por município e por candidato. Essa etapa é fundamental porque algumas cidades maiores aparecem várias vezes, por isso, é necessário totalizar os votos por cidade em função de cada candidato.
+
+```{r}
+votos_cand_mun_PR <- aggregate(votos_PR$QT_VOTOS_NOMINAIS ~ votos_PR$NM_MUNICIPIO + votos_PR$SQ_CANDIDATO, data = votos_PR, FUN = sum)
+```
+
+
+A seguir, vamos criar um banco com a quantidade total de votos que cada candidato recebeu.
+
+```{r}
+votos_totais_cand_PR <- aggregate(votos_PR$QT_VOTOS_NOMINAIS ~ votos_PR$SQ_CANDIDATO, data = votos_PR, FUN = sum)
+```
+
+## PESO POR MUNICÍPIO PARA CADA CANDIDATO 
+
+A seguir, vamos mesclar os dois bancos em função do SQ_CANDIDATO. Assim, teremos a quantidade total que cada candidato recebeu em uma coluna, e, na outra, a quantidade de votos que recebeu em cada município.
+
+```{r}
+votos_PESO_PR <- merge(votos_cand_mun_PR, votos_totais_cand_PR, by = "votos_PR$SQ_CANDIDATO")
+```
+
+Com isso, vamos calcular o peso relativo que cada município tem na quantidade total dos votos de cada candidato. 
+
+```{r}
+PESO_MUN_PR <- (as.numeric(votos_PESO_PR$"votos_PR$QT_VOTOS_NOMINAIS.x") / as.numeric(votos_PESO_PR$"votos_PR$QT_VOTOS_NOMINAIS.y")) * 100
+```
+
+Agora, vamos adicionar essas porcentagens ao banco votos_PESO_ES e modificar os nomes da colunas para ter algo mais compreensível. 
+
+```{r}
+colnames(votos_PESO_PR) <- c("SQ_CANDIDATO", "NM_MUNICIPIO",
+                              "VOTOS_MUN_CAND", "VOTOS_TOTAIS_CAND")
+
+votos_PESO_PR <- votos_PESO_PR %>%
+dplyr::mutate(PESO_MUN_PR = PESO_MUN_PR)
+```
+
+
+## PORCENTAGEM DE VOTOS DE CADA CANDIDATO EM CADA MUNICÍPIO
+
+A seguir, criamos um banco com a quantidade total de votos que cada município recebeu, independentemente dos candidatos.
+Obs: Existem 399 cidades no estado do Paraná.
+
+```{r}
+votos_totais_mun_PR <- aggregate(votos_PR$QT_VOTOS_NOMINAIS ~ votos_PR$NM_MUNICIPIO, data = votos_PR, FUN = sum)
+```
+
+A seguir, vamos mesclar o banco votos_cand_mun_RJ e o banco votos_totais_mun_RJ que acabamos de criar em função de NM_MUNICIPIO, os nomes dos municípios, para ter a quantidade de votos que cada candidato obteve em cada município. 
+
+```{r}
+votos_PORCENTAGEM_PR <- merge(votos_cand_mun_PR, votos_totais_mun_PR, by ="votos_PR$NM_MUNICIPIO")
+```
+
+A seguir, vamos criar a porcentagem de cada candidato em cada município:
+
+```{r}
+PORCENTAGEM_CAND_PR <- (as.numeric(votos_PORCENTAGEM_PR$"votos_PR$QT_VOTOS_NOMINAIS.x") / as.numeric(votos_PORCENTAGEM_PR$"votos_PR$QT_VOTOS_NOMINAIS.y")) * 100
+```
+
+
+Agora, vamos adicionar essas porcentagens ao banco votos_PORCENTAGEM_ES e modificar os nomes da colunas para ter algo mais compreensível. 
+
+```{r}
+votos_PORCENTAGEM_PR <- votos_PORCENTAGEM_PR %>%
+  dplyr::mutate(PORCENTAGEM_CAND_PR = PORCENTAGEM_CAND_PR)
+
+colnames(votos_PORCENTAGEM_PR) <- c("NM_MUNICIPIO", "SQ_CANDIDATO",
+                              "VOTOS_MUN_CAND", "VOTOS_TOTAIS_MUN", 
+                              "PORCENTAGEM_CAND_PR")
+```
+
+# CÁLCULO DA VARIÁVEL DOMINAÇÃO
+
+A seguir, vamos multiplicar os vetores PESO_MUN e PORCENTAGEM_CAND e vou adicionar esse vetor ao último banco criado. 
+Para fazer isso, eu preciso primeiro de reordenar meus dois bancos da mesma forma, votos_mun_cand_ES e votos_cand_ES, pois, eles foram criados de forma diferente: 
+
+```{r}
+votos_PESO_PR <- votos_PESO_PR %>%
+  arrange(votos_PESO_PR$SQ_CANDIDATO, votos_PESO_PR$NM_MUNICIPIO)
+
+votos_PORCENTAGEM_PR <- votos_PORCENTAGEM_PR %>%
+  arrange(votos_PORCENTAGEM_PR$SQ_CANDIDATO, votos_PORCENTAGEM_PR$NM_MUNICIPIO)
+
+MULTIP_PR <- votos_PESO_PR$PESO_MUN_PR * votos_PORCENTAGEM_PR$PORCENTAGEM_CAND_PR
+
+dominacao_PR <- votos_PESO_PR %>%
+  dplyr::mutate(MULTIP_PR = MULTIP_PR)
+```
+
+
+Enfim, vou fazer a média por candidato. Para isso, preciso primeiro somar essas porcentagens para cada candidato:
+
+
+```{r}
+dominacao_cand_PR <- aggregate(MULTIP_PR ~ SQ_CANDIDATO, data = votos_PORCENTAGEM_PR, FUN = sum)
+
+dominacao_cand_PR <- dominacao_cand_PR %>%
+  dplyr::mutate(MULTIP_PR = MULTIP_PR/399)
+```
+
+Primeiro, eu vou mesclar esse banco dominacao_cand com o banco cand_cont em função do SQ_CANDIDATO e renomear a coluna chamada MULTIP_ES. E vou também criar um banco com apenas os candidatos que foram eleitos.
+
+```{r}
+cand_cont_PR <- merge(dominacao_cand_PR, cand_cont, by = "SQ_CANDIDATO")
+
+colnames(cand_cont_PR)[2] <- "DOMINACAO"
+
+dep_cont_PR <- merge(cand_cont_PR, votos_PR, by = "SQ_CANDIDATO") %>%
+  filter(CD_SIT_TOT_TURNO %in% c(1, 2, 3),
+         NM_MUNICIPIO %in% "JUSSARA") %>%
+  dplyr::select(SQ_CANDIDATO, DOMINACAO, SG_UF.x, SG_PARTIDO.x, NM_PARTIDO.x, 
+         NR_IDADE_DATA_POSSE, DS_GENERO, CD_GRAU_INSTRUCAO,
+         DS_COR_RACA)
+```
+
+
+################################################################################
+
+Santa Catarina:
+
+```{r}
+votos_SC <- votos_mun_fil %>%
+  filter(SG_UF %in% c("SC"))
+```
+
+
+# DOMINACAO 
+
+Primeiramente, vamos criar um banco que totaliza a quantidade de votos por município e por candidato. Essa etapa é fundamental porque algumas cidades maiores aparecem várias vezes, por isso, é necessário totalizar os votos por cidade em função de cada candidato.
+
+```{r}
+votos_cand_mun_SC <- aggregate(votos_SC$QT_VOTOS_NOMINAIS ~ votos_SC$NM_MUNICIPIO + votos_SC$SQ_CANDIDATO, data = votos_SC, FUN = sum)
+```
+
+
+A seguir, vamos criar um banco com a quantidade total de votos que cada candidato recebeu.
+
+```{r}
+votos_totais_cand_SC <- aggregate(votos_SC$QT_VOTOS_NOMINAIS ~ votos_SC$SQ_CANDIDATO, data = votos_SC, FUN = sum)
+```
+
+## PESO POR MUNICÍPIO PARA CADA CANDIDATO 
+
+A seguir, vamos mesclar os dois bancos em função do SQ_CANDIDATO. Assim, teremos a quantidade total que cada candidato recebeu em uma coluna, e, na outra, a quantidade de votos que recebeu em cada município.
+
+```{r}
+votos_PESO_SC <- merge(votos_cand_mun_SC, votos_totais_cand_SC, by = "votos_SC$SQ_CANDIDATO")
+```
+
+Com isso, vamos calcular o peso relativo que cada município tem na quantidade total dos votos de cada candidato. 
+
+```{r}
+PESO_MUN_SC <- (as.numeric(votos_PESO_SC$"votos_SC$QT_VOTOS_NOMINAIS.x") / as.numeric(votos_PESO_SC$"votos_SC$QT_VOTOS_NOMINAIS.y")) * 100
+```
+
+Agora, vamos adicionar essas porcentagens ao banco votos_PESO_ES e modificar os nomes da colunas para ter algo mais compreensível. 
+
+```{r}
+colnames(votos_PESO_SC) <- c("SQ_CANDIDATO", "NM_MUNICIPIO",
+                              "VOTOS_MUN_CAND", "VOTOS_TOTAIS_CAND")
+
+votos_PESO_SC <- votos_PESO_SC %>%
+dplyr::mutate(PESO_MUN_SC = PESO_MUN_SC)
+```
+
+
+## PORCENTAGEM DE VOTOS DE CADA CANDIDATO EM CADA MUNICÍPIO
+
+A seguir, criamos um banco com a quantidade total de votos que cada município recebeu, independentemente dos candidatos.
+Obs: Existem 295 cidades no estado de Santa Catarina.
+
+```{r}
+votos_totais_mun_SC <- aggregate(votos_SC$QT_VOTOS_NOMINAIS ~ votos_SC$NM_MUNICIPIO, data = votos_SC, FUN = sum)
+```
+
+A seguir, vamos mesclar o banco votos_cand_mun_RJ e o banco votos_totais_mun_RJ que acabamos de criar em função de NM_MUNICIPIO, os nomes dos municípios, para ter a quantidade de votos que cada candidato obteve em cada município. 
+
+```{r}
+votos_PORCENTAGEM_SC <- merge(votos_cand_mun_SC, votos_totais_mun_SC, by ="votos_SC$NM_MUNICIPIO")
+```
+
+A seguir, vamos criar a porcentagem de cada candidato em cada município:
+
+```{r}
+PORCENTAGEM_CAND_SC <- (as.numeric(votos_PORCENTAGEM_SC$"votos_SC$QT_VOTOS_NOMINAIS.x") / as.numeric(votos_PORCENTAGEM_SC$"votos_SC$QT_VOTOS_NOMINAIS.y")) * 100
+```
+
+
+Agora, vamos adicionar essas porcentagens ao banco votos_PORCENTAGEM_ES e modificar os nomes da colunas para ter algo mais compreensível. 
+
+```{r}
+votos_PORCENTAGEM_SC <- votos_PORCENTAGEM_SC %>%
+  dplyr::mutate(PORCENTAGEM_CAND_SC = PORCENTAGEM_CAND_SC)
+
+colnames(votos_PORCENTAGEM_SC) <- c("NM_MUNICIPIO", "SQ_CANDIDATO",
+                              "VOTOS_MUN_CAND", "VOTOS_TOTAIS_MUN", 
+                              "PORCENTAGEM_CAND_SC")
+```
+
+# CÁLCULO DA VARIÁVEL DOMINAÇÃO
+
+A seguir, vamos multiplicar os vetores PESO_MUN e PORCENTAGEM_CAND e vou adicionar esse vetor ao último banco criado. 
+Para fazer isso, eu preciso primeiro de reordenar meus dois bancos da mesma forma, votos_mun_cand_ES e votos_cand_ES, pois, eles foram criados de forma diferente: 
+
+```{r}
+votos_PESO_SC <- votos_PESO_SC %>%
+  arrange(votos_PESO_SC$SQ_CANDIDATO, votos_PESO_SC$NM_MUNICIPIO)
+
+votos_PORCENTAGEM_SC <- votos_PORCENTAGEM_SC %>%
+  arrange(votos_PORCENTAGEM_SC$SQ_CANDIDATO, votos_PORCENTAGEM_SC$NM_MUNICIPIO)
+
+MULTIP_SC <- votos_PESO_SC$PESO_MUN_SC * votos_PORCENTAGEM_SC$PORCENTAGEM_CAND_SC
+
+dominacao_SC <- votos_PESO_SC %>%
+  dplyr::mutate(MULTIP_SC = MULTIP_SC)
+```
+
+
+Enfim, vou fazer a média por candidato. Para isso, preciso primeiro somar essas porcentagens para cada candidato:
+
+
+```{r}
+dominacao_cand_SC <- aggregate(MULTIP_SC ~ SQ_CANDIDATO, data = votos_PORCENTAGEM_SC, FUN = sum)
+
+dominacao_cand_SC <- dominacao_cand_SC %>%
+  dplyr::mutate(MULTIP_SC = MULTIP_SC/295)
+```
+
+
+Primeiro, eu vou mesclar esse banco dominacao_cand com o banco cand_cont em função do SQ_CANDIDATO e renomear a coluna chamada MULTIP_ES. E vou também criar um banco com apenas os candidatos que foram eleitos.
+
+```{r}
+cand_cont_SC <- merge(dominacao_cand_SC, cand_cont, by = "SQ_CANDIDATO")
+
+colnames(cand_cont_SC)[2] <- "DOMINACAO"
+
+dep_cont_SC <- merge(cand_cont_SC, votos_SC, by = "SQ_CANDIDATO") %>%
+  filter(CD_SIT_TOT_TURNO %in% c(1, 2, 3),
+         NM_MUNICIPIO %in% "BELMONTE") %>%
+  dplyr::select(SQ_CANDIDATO, DOMINACAO, SG_UF.x, SG_PARTIDO.x, NM_PARTIDO.x, 
+         NR_IDADE_DATA_POSSE, DS_GENERO, CD_GRAU_INSTRUCAO,
+         DS_COR_RACA)
+```
+
+
+################################################################################
+
+Rio Grande do Sul
+
+```{r}
+votos_RS <- votos_mun_fil %>%
+  filter(SG_UF %in% c("RS"))
+```
+
+
+# DOMINACAO 
+
+Primeiramente, vamos criar um banco que totaliza a quantidade de votos por município e por candidato. Essa etapa é fundamental porque algumas cidades maiores aparecem várias vezes, por isso, é necessário totalizar os votos por cidade em função de cada candidato.
+
+```{r}
+votos_cand_mun_RS <- aggregate(votos_RS$QT_VOTOS_NOMINAIS ~ votos_RS$NM_MUNICIPIO + votos_RS$SQ_CANDIDATO, data = votos_RS, FUN = sum)
+```
+
+
+A seguir, vamos criar um banco com a quantidade total de votos que cada candidato recebeu.
+
+```{r}
+votos_totais_cand_RS <- aggregate(votos_RS$QT_VOTOS_NOMINAIS ~ votos_RS$SQ_CANDIDATO, data = votos_RS, FUN = sum)
+```
+
+## PESO POR MUNICÍPIO PARA CADA CANDIDATO 
+
+A seguir, vamos mesclar os dois bancos em função do SQ_CANDIDATO. Assim, teremos a quantidade total que cada candidato recebeu em uma coluna, e, na outra, a quantidade de votos que recebeu em cada município.
+
+```{r}
+votos_PESO_RS <- merge(votos_cand_mun_RS, votos_totais_cand_RS, by = "votos_RS$SQ_CANDIDATO")
+```
+
+Com isso, vamos calcular o peso relativo que cada município tem na quantidade total dos votos de cada candidato. 
+
+```{r}
+PESO_MUN_RS <- (as.numeric(votos_PESO_RS$"votos_RS$QT_VOTOS_NOMINAIS.x") / as.numeric(votos_PESO_RS$"votos_RS$QT_VOTOS_NOMINAIS.y")) * 100
+```
+
+Agora, vamos adicionar essas porcentagens ao banco votos_PESO_ES e modificar os nomes da colunas para ter algo mais compreensível. 
+
+```{r}
+colnames(votos_PESO_RS) <- c("SQ_CANDIDATO", "NM_MUNICIPIO",
+                              "VOTOS_MUN_CAND", "VOTOS_TOTAIS_CAND")
+
+votos_PESO_RS <- votos_PESO_RS %>%
+dplyr::mutate(PESO_MUN_RS = PESO_MUN_RS)
+```
+
+
+## PORCENTAGEM DE VOTOS DE CADA CANDIDATO EM CADA MUNICÍPIO
+
+A seguir, criamos um banco com a quantidade total de votos que cada município recebeu, independentemente dos candidatos.
+Obs: Existem 497 cidades no estado de Rio Grande do Sul.
+
+```{r}
+votos_totais_mun_RS <- aggregate(votos_RS$QT_VOTOS_NOMINAIS ~ votos_RS$NM_MUNICIPIO, data = votos_RS, FUN = sum)
+```
+
+A seguir, vamos mesclar o banco votos_cand_mun_RJ e o banco votos_totais_mun_RJ que acabamos de criar em função de NM_MUNICIPIO, os nomes dos municípios, para ter a quantidade de votos que cada candidato obteve em cada município. 
+
+```{r}
+votos_PORCENTAGEM_RS <- merge(votos_cand_mun_RS, votos_totais_mun_RS, by ="votos_RS$NM_MUNICIPIO")
+```
+
+A seguir, vamos criar a porcentagem de cada candidato em cada município:
+
+```{r}
+PORCENTAGEM_CAND_RS <- (as.numeric(votos_PORCENTAGEM_RS$"votos_RS$QT_VOTOS_NOMINAIS.x") / as.numeric(votos_PORCENTAGEM_RS$"votos_RS$QT_VOTOS_NOMINAIS.y")) * 100
+```
+
+
+Agora, vamos adicionar essas porcentagens ao banco votos_PORCENTAGEM_ES e modificar os nomes da colunas para ter algo mais compreensível. 
+
+```{r}
+votos_PORCENTAGEM_RS <- votos_PORCENTAGEM_RS %>%
+  dplyr::mutate(PORCENTAGEM_CAND_RS = PORCENTAGEM_CAND_RS)
+
+colnames(votos_PORCENTAGEM_RS) <- c("NM_MUNICIPIO", "SQ_CANDIDATO",
+                              "VOTOS_MUN_CAND", "VOTOS_TOTAIS_MUN", 
+                              "PORCENTAGEM_CAND_RS")
+```
+
+# CÁLCULO DA VARIÁVEL DOMINAÇÃO
+
+A seguir, vamos multiplicar os vetores PESO_MUN e PORCENTAGEM_CAND e vou adicionar esse vetor ao último banco criado. 
+Para fazer isso, eu preciso primeiro de reordenar meus dois bancos da mesma forma, votos_mun_cand_ES e votos_cand_ES, pois, eles foram criados de forma diferente: 
+
+```{r}
+votos_PESO_RS <- votos_PESO_RS %>%
+  arrange(votos_PESO_RS$SQ_CANDIDATO, votos_PESO_RS$NM_MUNICIPIO)
+
+votos_PORCENTAGEM_RS <- votos_PORCENTAGEM_RS %>%
+  arrange(votos_PORCENTAGEM_RS$SQ_CANDIDATO, votos_PORCENTAGEM_RS$NM_MUNICIPIO)
+
+MULTIP_RS <- votos_PESO_RS$PESO_MUN_RS * votos_PORCENTAGEM_RS$PORCENTAGEM_CAND_RS
+
+dominacao_RS <- votos_PESO_RS %>%
+  dplyr::mutate(MULTIP_RS = MULTIP_RS)
+```
+
+
+Enfim, vou fazer a média por candidato. Para isso, preciso primeiro somar essas porcentagens para cada candidato:
+
+
+```{r}
+dominacao_cand_RS <- aggregate(MULTIP_RS ~ SQ_CANDIDATO, data = votos_PORCENTAGEM_RS, FUN = sum)
+
+dominacao_cand_RS <- dominacao_cand_RS %>%
+  dplyr::mutate(MULTIP_RS = MULTIP_RS/497)
+```
+
+Primeiro, eu vou mesclar esse banco dominacao_cand com o banco cand_cont em função do SQ_CANDIDATO e renomear a coluna chamada MULTIP_ES. E vou também criar um banco com apenas os candidatos que foram eleitos.
+
+```{r}
+cand_cont_RS <- merge(dominacao_cand_RS, cand_cont, by = "SQ_CANDIDATO")
+
+colnames(cand_cont_RS)[2] <- "DOMINACAO"
+
+dep_cont_RS <- merge(cand_cont_RS, votos_RS, by = "SQ_CANDIDATO") %>%
+  filter(CD_SIT_TOT_TURNO %in% c(1, 2, 3),
+         NM_MUNICIPIO %in% "TUNAS") %>%
+  dplyr::select(SQ_CANDIDATO, DOMINACAO, SG_UF.x, SG_PARTIDO.x, NM_PARTIDO.x, 
+         NR_IDADE_DATA_POSSE, DS_GENERO, CD_GRAU_INSTRUCAO,
+         DS_COR_RACA)
+```
+
+
+################################################################################
+
+Após tudo isso, vamos juntar os bancos cand_cont_ de cada estado para formar um banco so e fazer regressões generais.
+
+Primeiro com o banco dos deputados:
+
+De maneira desagregada: Deputados e partidos
+
+```{r}
+dep_cont_TUDO <- rbind(dep_cont_ES, dep_cont_MG, dep_cont_RJ, dep_cont_SP, dep_cont_PR, dep_cont_SC, dep_cont_RS)
+
+dep_cont_TUDO$NM_PARTIDO <- fct_relevel(dep_cont_TUDO$NM_PARTIDO, 
+                                  "PARTIDO DOS TRABALHADORES")
+levels(dep_cont_TUDO$NM_PARTIDO)
+```
+
+
+Regressão - Deputados e partidos
+
+```{r}
+regressao_dep_TUDO <- lm(DOMINACAO ~ as.character(NM_PARTIDO) + as.character(SG_UF.x) + NR_IDADE_DATA_POSSE + as.character(DS_GENERO) + as.character(CD_GRAU_INSTRUCAO) + as.character(DS_COR_RACA), data = dep_cont_TUDO, na.rm = TRUE)
+summary(regressao_dep_TUDO)
+```
+
+Primeiro, vamos avaliar os pressupostos.
+
+Pressuposto da linearidade
+
+```{r}
+plot(regressao_dep_TUDO, 1)
+```
+
+Pressuposto da homocedasticidade do erro
+
+```{r}
+plot(regressao_dep_TUDO, 3)
+```
+
+Pressuposto da ausência de autocorrelação entre os erros
+
+```{r}
+acf(regressao_dep_TUDO$residuals)
+
+durbinWatsonTest(regressao_dep_TUDO)
+```
+
+Pressuposto da normalidade do termo de erro e outliers
+
+```{r}
+plot(regressao_dep_TUDO, 2)
+
+sresid_dep_TUDO <- studres(regressao_dep_TUDO) 
+
+shapiro.test(sresid_dep_TUDO)
+```
+
+Pressuposto da multicolinearidade
+
+```{r}
+vif(regressao_dep_TUDO)
+```
+
+E outliers
+
+```{r}
+plot(regressao_dep_TUDO, 4)
+
+plot(regressao_dep_TUDO, 5)
+
+outlierTest(regressao_dep_TUDO)
+```
+
+
+De maneira agregada: Deputados e ideologias
+
+
+```{r}
+dep_cont_agregado_TUDO <- rbind(dep_cont_ES, dep_cont_MG, dep_cont_RJ, dep_cont_SP, dep_cont_PR, dep_cont_SC, dep_cont_RS)
+
+dep_cont_agregado_TUDO <- dep_cont_agregado_TUDO %>%
+  dplyr::mutate(NM_PARTIDO.x = recode(NM_PARTIDO.x,
+                             "MOVIMENTO DEMOCRÁTICO BRASILEIRO" = 2,
+                             "PARTIDO COMUNISTA BRASILEIRO" = 2,
+                             "PARTIDO COMUNISTA DO BRASIL" = 2,
+                             "PARTIDO DA CAUSA OPERÁRIA" = 2,
+                             "PARTIDO DA MOBILIZAÇÃO NACIONAL" = 2,
+                             "PARTIDO DA MULHER BRASILEIRA" = 2,
+                             "PARTIDO DA SOCIAL DEMOCRACIA BRASILEIRA" = 2,
+                             "PARTIDO DEMOCRÁTICO TRABALHISTA" = 2,
+                             "PARTIDO DOS TRABALHADORES" = 2, 
+                             "PARTIDO PÁTRIA LIVRE" = 2,
+                             "PARTIDO POPULAR SOCIALISTA" = 2,
+                             "PARTIDO REPUBLICANO DA ORDEM SOCIAL" = 2,
+                             "PARTIDO SOCIALISMO E LIBERDADE" = 2,
+                             "PARTIDO SOCIALISTA BRASILEIRO" = 2,
+                             "PARTIDO SOCIALISTA DOS TRABALHADORES UNIFICADO" = 2,
+                             "PARTIDO VERDE" = 2,
+                             "REDE SUSTENTABILIDADE" = 2,
+                             "SOLIDARIEDADE" = 2,
+                             
+                             "AVANTE" = 1,
+                             "DEMOCRACIA CRISTÃ" = 1,
+                             "PARTIDO NOVO" = 1, 
+                             "PARTIDO REPUBLICANO BRASILEIRO" = 1, 
+                             "PARTIDO SOCIAL DEMOCRÁTICO" = 1, 
+                             "PARTIDO SOCIAL LIBERAL" = 1, 
+                             "PARTIDO TRABALHISTA BRASILEIRO" = 1,
+                             "PARTIDO TRABALHISTA CRISTÃO" = 1,
+                             "PATRIOTA" = 1, 
+                             "PODEMOS" = 1,
+                             
+                             "DEMOCRATAS" = 0, 
+                             "PARTIDO DA REPÚBLICA" = 0, 
+                             "PARTIDO HUMANISTA DA SOLIDARIEDADE" = 0, 
+                             "PROGRESSISTAS" = 0,
+                             "PARTIDO RENOVADOR TRABALHISTA BRASILEIRO" = 0, 
+                             "PARTIDO REPUBLICANO PROGRESSISTA" = 0, 
+                             "PARTIDO SOCIAL CRISTÃO" = 0, 
+                             "PARTIDO TRABALHISTA BRASILEIRO" = 0)) 
+```
+
+```{r}
+regressao_dep_agregado_TUDO <- lm(DOMINACAO ~ as.character(NM_PARTIDO.x) + as.character(SG_UF.x) + NR_IDADE_DATA_POSSE + as.character(DS_GENERO) + as.character(CD_GRAU_INSTRUCAO) + as.character(DS_COR_RACA), data = dep_cont_agregado_TUDO, na.rm = TRUE)
+summary(regressao_dep_agregado_TUDO)
+```
+
+Vamos avaliar os pressupostos.
+
+Pressuposto da linearidade
+
+```{r}
+plot(regressao_dep_agregado_TUDO, 1)
+```
+
+Pressuposto da homocedasticidade do erro
+
+```{r}
+plot(regressao_dep_agregado_TUDO, 3)
+```
+
+Pressuposto da ausência de autocorrelação entre os erros
+
+```{r}
+acf(regressao_dep_agregado_TUDO$residuals)
+
+durbinWatsonTest(regressao_dep_agregado_TUDO)
+```
+
+Pressuposto da normalidade do termo de erro e outliers
+
+```{r}
+plot(regressao_dep_agregado_TUDO, 2)
+
+sresid_dep_agregado_TUDO <- studres(regressao_dep_agregado_TUDO) 
+
+shapiro.test(sresid_dep_agregado_TUDO)
+```
+
+Pressuposto da multicolinearidade
+
+```{r}
+vif(regressao_dep_agregado_TUDO)
+```
+
+E outliers
+
+```{r}
+plot(regressao_dep_agregado_TUDO, 4)
+
+plot(regressao_dep_agregado_TUDO, 5)
+
+outlierTest(regressao_dep_agregado_TUDO)
+```
+
+
+Depois com os candidatos
+
+De maneira desagregada: Candidatos e partidos
+
+```{r}
+cand_cont_TUDO <- rbind(cand_cont_ES, cand_cont_MG, cand_cont_RJ, cand_cont_SP, cand_cont_PR, cand_cont_SC, cand_cont_RS)
+
+cand_cont_TUDO$NM_PARTIDO <- fct_relevel(cand_cont_TUDO$NM_PARTIDO, 
+                                  "PARTIDO DOS TRABALHADORES")
+```
+
+```{r}
+regressao_cand_TUDO <- lm(DOMINACAO ~ as.character(NM_PARTIDO) + as.character(SG_UF) + NR_IDADE_DATA_POSSE + as.character(DS_GENERO) + as.character(CD_GRAU_INSTRUCAO) + as.character(DS_COR_RACA) + NM_PARTIDO*DS_GENERO + NM_PARTIDO*NR_IDADE_DATA_POSSE, data = cand_cont_TUDO, na.rm = TRUE)
+summary(regressao_cand_TUDO)
+```
+
+Vamos avaliar os pressupostos.
+
+Pressuposto da linearidade
+
+```{r}
+plot(regressao_cand_TUDO, 1)
+```
+
+Pressuposto da homocedasticidade do erro
+
+```{r}
+plot(regressao_cand_TUDO, 3)
+```
+
+Pressuposto da ausência de autocorrelação entre os erros
+
+```{r}
+acf(regressao_cand_TUDO$residuals)
+
+durbinWatsonTest(regressao_cand_TUDO)
+```
+
+Pressuposto da normalidade do termo de erro e outliers
+
+```{r}
+plot(regressao_cand_TUDO, 2)
+
+sresid_cand_TUDO <- studres(regressao_cand_TUDO) 
+
+shapiro.test(sresid_cand_TUDO)
+```
+
+
+Pressuposto da multicolinearidade
+
+```{r}
+vif(regressao_cand_TUDO)
+```
+
+E outliers
+
+```{r}
+plot(regressao_cand_TUDO, 4)
+
+plot(regressao_cand_TUDO, 5)
+
+outlierTest(regressao_cand_TUDO)
+```
+
+E de maneira agregada: candidatos e ideologias
+
+```{r}
+cand_cont_agregado_TUDO <- rbind(cand_cont_ES, cand_cont_MG, cand_cont_RJ, cand_cont_SP, cand_cont_PR, cand_cont_SC, cand_cont_RS)
+
+cand_cont_agregado_TUDO <- cand_cont_agregado_TUDO %>%
+  dplyr::mutate(NM_PARTIDO = recode(NM_PARTIDO,
+                             "MOVIMENTO DEMOCRÁTICO BRASILEIRO" = 2,
+                             "PARTIDO COMUNISTA BRASILEIRO" = 2,
+                             "PARTIDO COMUNISTA DO BRASIL" = 2,
+                             "PARTIDO DA CAUSA OPERÁRIA" = 2,
+                             "PARTIDO DA MOBILIZAÇÃO NACIONAL" = 2,
+                             "PARTIDO DA MULHER BRASILEIRA" = 2,
+                             "PARTIDO DA SOCIAL DEMOCRACIA BRASILEIRA" = 2,
+                             "PARTIDO DEMOCRÁTICO TRABALHISTA" = 2,
+                             "PARTIDO DOS TRABALHADORES" = 2, 
+                             "PARTIDO PÁTRIA LIVRE" = 2,
+                             "PARTIDO POPULAR SOCIALISTA" = 2,
+                             "PARTIDO REPUBLICANO DA ORDEM SOCIAL" = 2,
+                             "PARTIDO SOCIALISMO E LIBERDADE" = 2,
+                             "PARTIDO SOCIALISTA BRASILEIRO" = 2,
+                             "PARTIDO SOCIALISTA DOS TRABALHADORES UNIFICADO" = 2,
+                             "PARTIDO VERDE" = 2,
+                             "REDE SUSTENTABILIDADE" = 2,
+                             "SOLIDARIEDADE" = 2,
+                             
+                             "AVANTE" = 1,
+                             "DEMOCRACIA CRISTÃ" = 1,
+                             "PARTIDO NOVO" = 1, 
+                             "PARTIDO REPUBLICANO BRASILEIRO" = 1, 
+                             "PARTIDO SOCIAL DEMOCRÁTICO" = 1, 
+                             "PARTIDO SOCIAL LIBERAL" = 1, 
+                             "PARTIDO TRABALHISTA BRASILEIRO" = 1,
+                             "PARTIDO TRABALHISTA CRISTÃO" = 1,
+                             "PATRIOTA" = 1, 
+                             "PODEMOS" = 1,
+                             
+                             "DEMOCRATAS" = 0, 
+                             "PARTIDO DA REPÚBLICA" = 0, 
+                             "PARTIDO HUMANISTA DA SOLIDARIEDADE" = 0, 
+                             "PROGRESSISTAS" = 0,
+                             "PARTIDO RENOVADOR TRABALHISTA BRASILEIRO" = 0, 
+                             "PARTIDO REPUBLICANO PROGRESSISTA" = 0, 
+                             "PARTIDO SOCIAL CRISTÃO" = 0, 
+                             "PARTIDO TRABALHISTA BRASILEIRO" = 0)) 
+```
+
+```{r}
+regressao_cand_agregado_TUDO <- lm(DOMINACAO ~ as.character(NM_PARTIDO) + as.character(SG_UF) + NR_IDADE_DATA_POSSE + as.character(DS_GENERO) + as.character(CD_GRAU_INSTRUCAO) + as.character(DS_COR_RACA) + NM_PARTIDO*DS_GENERO + NM_PARTIDO*NR_IDADE_DATA_POSSE + NM_PARTIDO*SG_UF + NM_PARTIDO, data = cand_cont_agregado_TUDO, na.rm = TRUE)
+summary(regressao_cand_agregado_TUDO)
+```
+
+Vamos avaliar os pressupostos.
+
+Pressuposto da linearidade
+
+```{r}
+plot(regressao_cand_agregado_TUDO, 1)
+```
+
+Pressuposto da homocedasticidade do erro
+
+```{r}
+plot(regressao_cand_agregado_TUDO, 3)
+```
+
+Pressuposto da ausência de autocorrelação entre os erros
+
+```{r}
+acf(regressao_cand_agregado_TUDO$residuals)
+
+durbinWatsonTest(regressao_cand_agregado_TUDO)
+```
+
+Pressuposto da normalidade do termo de erro e outliers
+
+```{r}
+plot(regressao_cand_agregado_TUDO, 2)
+
+sresid_cand_agregado_TUDO <- studres(regressao_cand_agregado_TUDO) 
+
+shapiro.test(sresid_cand_agregado_TUDO)
+```
+
+Pressuposto da multicolinearidade
+
+```{r}
+vif(regressao_cand_agregado_TUDO)
+```
+
+E outliers
+
+```{r}
+plot(regressao_cand_agregado_TUDO, 4)
+
+plot(regressao_cand_agregado_TUDO, 5)
+
+outlierTest(regressao_cand_agregado_TUDO)
+```
+
+
+################################################################################
+
+Primeiro, vamos fazer os gráficos para observar as distribuições das variáveis:
+
+**Gráfico 1 – Dominância de todos os candidatos**
+
+```{r, echo = FALSE, warning = FALSE}
+ggplot(cand_cont_TUDO, aes(DOMINACAO)) +
+  geom_density(adjust = 1) + 
+  labs(title = "Dominância dos candidatos", subtitle = "Gráfico 1",
+    x = "Dominância dos candidatos", y = "Densidade",
+    caption = "Fonte: elaboração da autora")
+```
+
+**Gráfico 2 – Dominância dos deputados eleitos**
+
+```{r, echo = FALSE, warning = FALSE}
+ggplot(dep_cont_TUDO, aes(DOMINACAO)) +
+  geom_density(adjust = 1) + 
+  labs(title = "Dominância dos deputados", subtitle = "Gráfico 2",
+    x = "Dominância dos deputados", y = "Densidade",
+    caption = "Fonte: elaboração da autora")
+```
+
+**Gráfico 3 – Ideologias e Candidatos**
+
+```{r, echo = FALSE, warning = FALSE}
+ggplot(cand_cont_agregado_TUDO, aes(NM_PARTIDO, ..count../sum(..count..) )) +
+  geom_bar(na.rm = T) +
+  scale_y_continuous(labels = percent) +
+  theme_minimal() + 
+  labs(
+    title = "Ideologia dos partidos - candidatos", subtitle = "Gráfico 3",
+    x = "Ideologia dos partidos", y = "Porcentagem",
+    caption = "Fonte: elaboração da autora")
+```
+
+**Gráfico 4 – Partidos e Candidatos**
+
+```{r, echo = FALSE, warning = FALSE}
+ggplot(cand_cont_TUDO, aes(y = SG_PARTIDO)) +
+  geom_bar(na.rm = T) +
+  theme_minimal() + 
+  labs(title = "Partidos - candidatos", subtitle = "Gráfico 4",
+    x = "Partidos", y = "Porcentagem",
+    caption = "Fonte: elaboração da autora")
+
+cand_cont_TUDO %>%
+  count(NM_PARTIDO, sort = T)
+```
+
+**Gráfico 5 – Ideologia e Deputados**
+
+```{r, echo = FALSE, warning = FALSE}
+ggplot(dep_cont_agregado_TUDO, aes(NM_PARTIDO.x, ..count../sum(..count..) )) +
+  geom_bar(na.rm = T) +
+  scale_y_continuous(labels = percent) +
+  theme_minimal() + 
+  labs(title = "Ideologia dos partidos - deputados", subtitle = "Gráfico 5",
+    x = "Ideologia dos partidos", y = "Porcentagem",
+    caption = "Fonte: elaboração da autora")
+
+```
+
+**Gráfico 6 – Partidos e deputados**
+
+```{r, echo = FALSE, warning = FALSE}
+ggplot(dep_cont_TUDO, aes(NM_PARTIDO)) +
+  geom_bar(na.rm = T) +
+  theme(axis.text.x = element_text(angle = 100, hjust = 1)) +
+  theme_minimal() + 
+  labs(title = "Partidos - deputados", subtitle = "Gráfico 6",
+    x = "Partidos", y = "Porcentagem",
+    caption = "Fonte: elaboração da autora")
+
+dep_cont_TUDO %>%
+  count(NM_PARTIDO, sort = T)
+```
+
+**Gráficos 7 e 8 – Idade dos candidatos**
+
+```{r, echo = FALSE, warning = FALSE}
+ggplot(cand_cont_TUDO, aes(NR_IDADE_DATA_POSSE, ..count../sum(..count..) )) +
+  geom_density(adjust = 1) +
+  scale_y_continuous(labels = percent) +
+  geom_vline(aes(xintercept = mean(NR_IDADE_DATA_POSSE, na.rm = T))) +
+  theme_minimal() +
+  labs(title = "Idade dos candidatos", subtitle = "Gráfico 7",
+    x = "Quantidade", y = "Idade",
+    caption = "Fonte: elaboração da autora")
+  
+```
+
+```{r, echo = FALSE, warning = FALSE} 
+ggplot(cand_cont_TUDO, aes(x = "", y = NR_IDADE_DATA_POSSE)) + 
+  geom_violin(draw_quantiles = c(0.25, 0.5, 0.75)) +
+  theme_minimal() +
+  labs(title = "Idade dos candidatos - Violino", subtitle = "Gráfico 8",
+    x = "Quantidade", y = "Idade",
+    caption = "Fonte: elaboração da autora")
+```
+
+**Gráfico 9 e 10 – Idade dos deputados**
+
+```{r, echo = FALSE, warning = FALSE}
+ggplot(dep_cont_TUDO, aes(NR_IDADE_DATA_POSSE), ..count../sum(..count..)) +
+  geom_density(adjust = 0.5) +
+  scale_y_continuous(labels = percent) +
+  geom_vline(aes(xintercept = mean(NR_IDADE_DATA_POSSE, na.rm = T))) +
+  theme_minimal() +
+  labs(title = "Idade dos deputados", subtitle = "Gráfico 9",
+    x = "Quantidade", y = "Idade",
+    caption = "Fonte: elaboração da autora")
+  
+```
+
+```{r, echo = FALSE, warning = FALSE} 
+  ggplot(dep_cont_TUDO, aes(x = "", y = NR_IDADE_DATA_POSSE)) + 
+geom_violin(draw_quantiles = c(0.25, 0.5, 0.75)) +
+  theme_minimal() +
+  labs(title = "Idade dos deputados - Violino", subtitle = "Gráfico 10",
+    x = "Quantidade", y = "Idade",
+    caption = "Fonte: elaboração da autora")
+```
+
+**Gráfico 11 – Gênero dos candidatos**
+
+```{r, echo = FALSE, warning = FALSE}
+ggplot(cand_cont_TUDO, aes(DS_GENERO, ..count../sum(..count..) )) +
+  geom_bar(na.rm = T) +
+  scale_y_continuous(labels = percent) +
+  theme_minimal() + 
+  labs(
+    title = "Gênero dos candidatos", subtitle = "Gráfico 11",
+    x = "Gênero dos candidatos", y = "Porcentagem",
+    caption = "Fonte: elaboração da autora")
+```
+
+**Gráfico 12 – Gênero dos deputados**
+
+```{r, echo = FALSE, warning = FALSE}
+ggplot(dep_cont_TUDO, aes(DS_GENERO, ..count../sum(..count..) )) +
+  geom_bar(na.rm = T) +
+  scale_y_continuous(labels = percent) +
+  theme_minimal() + 
+  labs(
+    title = "Gênero dos deputados", subtitle = "Gráfico 12",
+    x = "Gênero dos deputados", y = "Porcentagem",
+    caption = "Fonte: elaboração da autora")
+```
+
+**Gráfico 13 – Grau de instrução dos candidatos**
+
+```{r, echo = FALSE, warning = FALSE}
+ggplot(cand_cont_TUDO, aes(CD_GRAU_INSTRUCAO, ..count../sum(..count..) )) +
+  geom_bar(na.rm = T) +
+  scale_y_continuous(labels = percent) +
+  theme_minimal() + 
+  labs(
+    title = "Grau de instrução dos candidatos", subtitle = "Gráfico 13",
+    x = "Grau de instrução dos candidatos", y = "Porcentagem",
+    caption = "Fonte: elaboração da autora")
+```
+
+**Gráfico 14 – Grau de instrução dos deputados**
+
+```{r, echo = FALSE, warning = FALSE}
+ggplot(dep_cont_TUDO, aes(CD_GRAU_INSTRUCAO, ..count../sum(..count..) )) +
+  geom_bar(na.rm = T) +
+  scale_y_continuous(labels = percent) +
+  theme_minimal() + 
+  labs(
+    title = "Grau de instrução dos deputados", subtitle = "Gráfico 14",
+    x = "Grau de instrução dos deputados", y = "Porcentagem",
+    caption = "Fonte: elaboração da autora")
+```
+
+**Gráfico 15 – Cor/Raça dos candidatos**
+
+```{r, echo = FALSE, warning = FALSE}
+ggplot(cand_cont_TUDO, aes(DS_COR_RACA, ..count../sum(..count..) )) +
+  geom_bar(na.rm = T) +
+  scale_y_continuous(labels = percent) +
+  theme_minimal() + 
+  labs(
+    title = "Cor, raça dos candidatos", subtitle = "Gráfico 15",
+    x = "Cor, raça dos candidatos", y = "Porcentagem",
+    caption = "Fonte: elaboração da autora")
+```
+
+**Gráfico 16 – Cor/Raça dos deputados**
+
+```{r, echo = FALSE, warning = FALSE}
+ggplot(dep_cont_TUDO, aes(DS_COR_RACA, ..count../sum(..count..) )) +
+  geom_bar(na.rm = T) +
+  scale_y_continuous(labels = percent) +
+  theme_minimal() + 
+  labs(
+    title = "Cor, raça dos deputados", subtitle = "Gráfico 16",
+    x = "Cor, raça dos deputados", y = "Porcentagem",
+    caption = "Fonte: elaboração da autora")
+```
+
+
+### 2.1.2. Testes de associação
+
+Vamos agora passar aos testes de associação entre a dominância (VD) e as variáveis independentes de nossos modelos.
+
+**Teste de associação entre a dominância e a ideologia dos partidos – candidatos e ideologia**
+
+```{r, echo = FALSE, warning = FALSE}
+kruskal.test(DOMINACAO ~ NM_PARTIDO, data = cand_cont_agregado_TUDO)
+```
+
+Fizemos um teste de Kruskal, pois, a dominância é uma variável continua e a ideologia dos partidos uma variável categórica. 
+
+**Teste de associação entre a dominância e os partidos - candidatos e partidos**
+
+```{r, echo = FALSE, warning = FALSE}
+kruskal.test(DOMINACAO ~ NM_PARTIDO, data = cand_cont_TUDO)
+```
+
+Fizemos um teste de Kruskal, pois, a dominância é uma variável continua e os partidos uma variável categórica. 
+
+**Teste de associação entre a dominância e a ideologia dos partidos - deputados e ideologia**
+
+```{r, echo = FALSE, warning = FALSE}
+kruskal.test(DOMINACAO ~ NM_PARTIDO.x, data = dep_cont_agregado_TUDO)
+```
+
+Fizemos um teste de Kruskal, pois, a dominância é uma variável continua e a ideologia dos partidos uma variável categórica. 
+
+**Teste de associação entre a dominância e os partidos - deputados e partidos**
+
+```{r, echo = FALSE, warning = FALSE}
+kruskal.test(DOMINACAO ~ NM_PARTIDO.x, data = dep_cont_TUDO)                    
+```
+
+Fizemos um teste de Kruskal, pois, a dominância é uma variável continua e os partidos uma variável categórica. 
+
+**Teste de associação entre a dominância e a idade dos candidatos**
+
+```{r, echo = FALSE, warning = FALSE}
+cor.test(cand_cont_TUDO$DOMINACAO, cand_cont_TUDO$NR_IDADE_DATA_POSSE)
+```
+
+Fizemos um teste de correlação de Pearson, pois, a dominância e a idade são duas variáveis categóricas. 
+
+**Teste de associação entre a dominância e a idade dos deputados**
+
+```{r, echo = FALSE, warning = FALSE}
+cor.test(dep_cont_TUDO$DOMINACAO, dep_cont_TUDO$NR_IDADE_DATA_POSSE)
+```
+
+Fizemos um teste de correlação de Pearson, pois, a dominância e a idade são duas variáveis categóricas. 
+
+**Teste de associação entre a dominância e o gênero dos candidatos**
+
+```{r, echo = FALSE, warning = FALSE}
+kruskal.test(DOMINACAO ~ DS_GENERO, data = cand_cont_TUDO)                    
+```
+
+Fizemos um teste de Kruskal, pois, a dominância é uma variável continua e o gênero uma variável categórica. 
+
+**Teste de associação entre a dominância e o gênero dos deputados**
+
+```{r, echo = FALSE, warning = FALSE}
+kruskal.test(DOMINACAO ~ DS_GENERO, data = dep_cont_TUDO)                    
+```
+Fizemos um teste de Kruskal, pois, a dominância é uma variável continua e o gênero uma variável categórica. 
+
+**Teste de associação entre a dominância e o grau de instrução dos candidatos**
+
+```{r, echo = FALSE, warning = FALSE}
+kruskal.test(DOMINACAO ~ CD_GRAU_INSTRUCAO, data = cand_cont_TUDO)                    
+```
+
+Fizemos um teste de Kruskal, pois, a dominância é uma variável continua e o grau de instrução uma variável categórica. 
+
+**Teste de associação entre a dominância e o grau de instrução dos deputados**
+
+```{r, echo = FALSE, warning = FALSE}
+kruskal.test(DOMINACAO ~ CD_GRAU_INSTRUCAO, data = dep_cont_TUDO)                    
+```
+
+Fizemos um teste de Kruskal, pois, a dominância é uma variável continua e o grau de instrução uma variável categórica. 
+
+**Teste de associação entre a dominância e a cor/raça dos candidatos**
+
+```{r, echo = FALSE, warning = FALSE}
+kruskal.test(DOMINACAO ~ DS_COR_RACA, data = cand_cont_TUDO)                    
+```
+
+Fizemos um teste de Kruskal, pois, a dominância é uma variável continua e o cor/raça uma variável categórica.
+
+**Teste de associação entre a dominância e a cor/raça dos deputados**
+
+```{r, echo = FALSE, warning = FALSE}
+kruskal.test(DOMINACAO ~ DS_COR_RACA, data = dep_cont_TUDO)                    
+```
+
+Fizemos um teste de Kruskal, pois, a dominância é uma variável continua e a cor/raça uma variável categórica. 
+### 2.1.2. Testes de associação das interações
+
+Vamos agora fazer e analisar os testes de interações entre as variáveis independentes que vamos fazer interagir nas regressões. 
+
+#### Interação entre ideologia e gênero - para candidatos
+
+Visto que queremos saber a associação entre ideologias dos partidos e gêneros faremos um teste de chi-quadrado, porque são duas variáveis categóricas. Visto que queremos conhecer essa associação em função da ideologia, faremos a primeira tabela, aquela que dá as proporções em função da ideologia.
+
+```{r}
+tabela_1 <- table(cand_cont_agregado_TUDO$NM_PARTIDO, cand_cont_agregado_TUDO$DS_GENERO)
+
+prop.table(tabela_1, 1)
+```
+
+
+```{r}
+chisq.test(tabela_1)
+```
+
+```{r}
+assoc(tabela_1, shade = TRUE)
+```
+
+```{r}
+mosaicplot(tabela_1, shade = TRUE)
+```
+
+#### Interação entre partidos e gênero - para candidatos
+
+Visto que queremos saber a associação entre os partidos e gêneros faremos um teste de chi-quadrado, porque são duas variáveis categóricas. Visto que queremos conhecer essa associação em função dos partidos, faremos a primeira tabela, aquela que me dá as proporções em função dos partidos.
+
+```{r, echo = FALSE, warning = FALSE}
+tabela_2 <- table(cand_cont_TUDO$NM_PARTIDO, cand_cont_TUDO$DS_GENERO)
+
+prop.table(tabela_2, 1)
+```
+
+Agora vamos fazer o teste chi-quadrado dessa tabela_2:
+
+```{r, echo = FALSE, warning = FALSE}
+chisq.test(tabela_2)
+```
+
+Enfim, fazemos o gráfico mostrando essa associação:
+
+```{r, echo = FALSE, warning = FALSE}
+assoc(tabela_2, shade = TRUE) + 
+  theme(axis.text.y = element_text(angle = 45, hjust = 1))
+```
+
+```{r, echo = FALSE, warning = FALSE}
+mosaicplot(tabela_2, shade = TRUE)
+```
+
+#### Interação entre ideologias e gênero - para deputados
+
+Visto que queremos saber a associação entre ideologias dos partidos e gêneros, faremos um teste de chi-quadrado, porque são duas variáveis categóricas. Visto que queremos conhecer essa associação em função da ideologia, escolhemos a primeira tabela, aquela que dá as proporções em função da ideologia.
+
+```{r, echo = FALSE, warning = FALSE}
+tabela_3 <- table(dep_cont_agregado_TUDO$NM_PARTIDO.x, dep_cont_agregado_TUDO$DS_GENERO)
+
+prop.table(tabela_3, 1)
+```
+
+Agora vamos fazer o teste chi-quadrado dessa tabela_3:
+
+```{r, echo = FALSE, warning = FALSE}
+chisq.test(tabela_3)
+```
+
+Enfim, vamos fazer o gráfico mostrando essa associação:
+
+```{r, echo = FALSE, warning = FALSE}
+assoc(tabela_3, shade = TRUE)
+```
+
+
+```{r, echo = FALSE, warning = FALSE}
+mosaicplot(tabela_3, shade = TRUE)
+```
+
+#### Interação entre partidos e gênero - para deputados
+
+Visto que queremos saber a associação entre os partidos e gêneros vamos fazer um teste de chi-quadrado, porque são duas variáveis categóricas. Visto que queremos conhecer essa associação em função dos partidos, eu vou fazer a primeira tabela, aquela que me dá as proporções em função dos partidos.
+
+```{r, echo = FALSE, warning = FALSE}
+tabela_4 <- table(dep_cont_TUDO$NM_PARTIDO, dep_cont_TUDO$DS_GENERO)
+
+prop.table(tabela_4, 1)
+```
+
+Agora vamos fazer o teste chi-quadrado dessa tabela_4:
+
+```{r, echo = FALSE, warning = FALSE}
+chisq.test(tabela_4)
+```
+
+Enfim, vamos fazer o gráfico mostrando essa associação:
+
+```{r, echo = FALSE, warning = FALSE}
+assoc(tabela_4, shade = TRUE)
+```
+
+```{r, echo = FALSE, warning = FALSE}
+mosaicplot(tabela_4, shade = TRUE)
+```
+
+#### Interação entre ideologias e cor/raça - para candidatos
+
+Visto que queremos saber a associação entre ideologias dos partidos e a cor/raça, vamos fazer um teste de chi-quadrado, porque são duas variáveis categóricas. Visto que queremos conhecer essa associação em função da ideologia, escolhemos a primeira tabela, aquela que dá as proporções em função da ideologia.
+
+```{r, echo = FALSE, warning = FALSE}
+tabela_5 <- table(cand_cont_agregado_TUDO$NM_PARTIDO, cand_cont_agregado_TUDO$DS_COR_RACA)
+
+prop.table(tabela_5, 1)
+```
+
+Agora vamos fazer o teste chi-quadrado dessa tabela_5:
+
+```{r, echo = FALSE, warning = FALSE}
+chisq.test(tabela_5)
+```
+
+Enfim, vamos fazer o gráfico mostrando essa associação:
+
+```{r, echo = FALSE, warning = FALSE}
+assoc(tabela_5, shade = TRUE)
+```
+
+
+```{r, echo = FALSE, warning = FALSE}
+mosaicplot(tabela_5, shade = TRUE)
+```
+
+
+#### Interação entre partidos e cor/raça - para candidatos
+
+Visto que queremos saber a associação entre os partidos e cor/raça, vamos fazer um teste de chi-quadrado, porque são duas variáveis categóricas. Visto que queremos conhecer essa associação em função dos partidos, vamos fazer a primeira tabela, aquela que dá as proporções em função dos partidos.
+
+```{r, echo = FALSE, warning = FALSE}
+tabela_6 <- table(cand_cont_TUDO$NM_PARTIDO, cand_cont_TUDO$DS_COR_RACA)
+
+prop.table(tabela_6, 1)
+```
+
+Agora vamos fazer o teste chi-quadrado dessa tabela_6:
+
+```{r, echo = FALSE, warning = FALSE}
+chisq.test(tabela_6)
+```
+
+Enfim, vamos fazer o gráfico mostrando essa associação:
+
+```{r, echo = FALSE, warning = FALSE}
+assoc(tabela_6, shade = TRUE)
+```
+
+```{r, echo = FALSE, warning = FALSE}
+mosaicplot(tabela_6, shade = TRUE)
+```
+
+Os gráficos de associação e de mosaica são ilegíveis por causa da grande quantidade de partidos. 
+
+
+#### Interação entre ideologias e cor/raça - para deputados
+
+Visto que queremos saber a associação entre ideologias dos partidos e cor/raça vamos fazer um teste de chi-quadrado, porque são duas variáveis categóricas. Visto que queremos conhecer essa associação em função da ideologia, vamos fazer a primeira tabela, aquela que me dá as proporções em função da ideologia.
+
+```{r, echo = FALSE, warning = FALSE}
+tabela_7 <- table(dep_cont_agregado_TUDO$NM_PARTIDO.x, dep_cont_agregado_TUDO$DS_COR_RACA)
+
+prop.table(tabela_7, 1)
+```
+
+Agora vamos fazer o teste chi-quadrado dessa tabela_7:
+
+```{r, echo = FALSE, warning = FALSE}
+chisq.test(tabela_7)
+```
+
+Enfim, vamos fazer o gráfico mostrando essa associação:
+
+```{r, echo = FALSE, warning = FALSE}
+assoc(tabela_7, shade = TRUE)
+```
+
+
+```{r, echo = FALSE, warning = FALSE}
+mosaicplot(tabela_7, shade = TRUE)
+```
+
+
+#### Interação entre partidos e cor/raça - para deputados
+
+Visto que queremos saber a associação entre os partidos e gêneros vamos fazer um teste de chi-quadrado, porque são duas variáveis categóricas. Visto que queremos conhecer essa associação em função dos partidos, vamos fazer a primeira tabela, aquela que me dá as proporções em função dos partidos.
+
+```{r, echo = FALSE, warning = FALSE}
+tabela_8 <- table(dep_cont_TUDO$NM_PARTIDO, dep_cont_TUDO$DS_COR_RACA)
+
+prop.table(tabela_8, 2)
+```
+
+Agora vamos fazer o teste chi-quadrado dessa tabela_8:
+
+```{r, echo = FALSE, warning = FALSE}
+chisq.test(tabela_8)
+```
+
+Enfim, vamos fazer os gráficos mostrando essa associação:
+
+```{r, echo = FALSE, warning = FALSE}
+assoc(tabela_8, shade = TRUE)
+```
+
+```{r, echo = FALSE, warning = FALSE}
+mosaicplot(tabela_8, shade = TRUE)
+```
+
+
